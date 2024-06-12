@@ -1,0 +1,144 @@
+name: CI
+on:
+  # CI is run on main because new branches can only access caches from master, not previous branches.
+  # So building on master allows new PR's to get the cache from before.
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# prevent multiple simultaneous test runs
+concurrency:
+  group: '${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}'
+  cancel-in-progress: true
+
+jobs:
+  build-image:
+    timeout-minutes: 10
+    runs-on: 'warp-ubuntu-latest-arm64-16x'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Docker buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        id: docker-image
+        uses: docker/build-push-action@v5
+        with:
+          cache-from: type=gha
+          cache-to: type=gha,type=inline
+          context: .
+          file: Dockerfile.hubble
+          load: true
+          tags: farcasterxyz/hubble:test
+
+      - name: Run Hubble
+        shell: bash
+        run: docker run --name hub --detach -p2282:2282 -p2283:2283 farcasterxyz/hubble:test sh -c 'node build/cli.js identity create && HUBBLE_ARGS="start --rpc-port 2283 --ip 0.0.0.0 --gossip-port 2282 --eth-mainnet-rpc-url https://eth-mainnet.g.alchemy.com/v2/8cz__IXnQ5FK_GNYDlfooLzYhBAW7ta0 --l2-rpc-url https://opt-mainnet.g.alchemy.com/v2/3xWX-cWV-an3IPXmVCRXX51PpQzc-8iJ --network 3 --allowed-peers none --catchup-sync-with-snapshot false" npx pm2-runtime start pm2.config.cjs'
+
+      - name: Download grpcurl
+        shell: bash
+        run: curl -L https://github.com/fullstorydev/grpcurl/releases/download/v1.8.7/grpcurl_1.8.7_linux_arm64.tar.gz -o - | tar -xzf -
+
+      - name: Check that gRPC server is running
+        uses: nick-fields/retry@v3
+        with:
+          timeout_seconds: 10
+          retry_wait_seconds: 5
+          max_attempts: 10
+          shell: bash
+          command: ./grpcurl -plaintext -import-path protobufs/schemas -proto protobufs/schemas/rpc.proto 127.0.0.1:2283 HubService.GetInfo
+          on_retry_command: docker logs hub
+
+  test:
+    timeout-minutes: 10
+
+    strategy:
+      matrix:
+        include:
+          - node_version: 20
+            runs_on: 'warp-ubuntu-latest-x64-16x'
+          - node_version: 21
+            runs_on: 'warp-ubuntu-latest-arm64-16x'
+
+    runs-on: ${{ matrix.runs_on }}
+    name: test (${{ matrix.node_version }})
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: shuttle
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: shuttle
+        ports:
+          - 6541:5432
+        options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 16379:6379
+        options: --health-cmd "redis-cli ping" --health-interval 10s --health-timeout 5s --health-retries 5
+
+    steps:
+      # Needed for WarpBuild ARM runners
+      - if: ${{ startsWith(runner.arch, 'ARM') }}
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node_version }}
+
+      - name: Restore cached dependencies for Node modules.
+        id: module-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/node_modules
+          key: ${{ runner.os }}-${{ runner.arch }}--node--${{ matrix.node_version}}--${{ hashFiles('yarn.lock') }}
+
+      - name: Cache Cargo registry and git
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-registry-${{ hashFiles('apps/hubble/src/addon/Cargo.lock') }}
+
+      - name: Cache Cargo build artifacts
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/apps/hubble/src/addon/target
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-build-${{ hashFiles('apps/hubble/src/addon/Cargo.lock') }}
+
+      - name: Install Protocol Buffer Compiler
+        uses: arduino/setup-protoc@v3
+        with:
+          version: "24.4"
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          # Pinning until https://github.com/foundry-rs/foundry/issues/5749 is fixed
+          version: nightly-ca67d15f4abd46394b324c50e21e66f306a1162d
+
+      - name: Install dependencies
+        run: yarn install
+
+      - name: Run build
+        run: yarn build
+
+      - name: Run linter
+        run: yarn lint:ci
+
+      - name: Run tests
+        run: yarn test:ci
+
+      - name: Upload coverage results
+        uses: codecov/codecov-action@v4
+        continue-on-error: true # Don't fail the build if codecov fails
+        timeout-minutes: 1
+
