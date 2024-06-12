@@ -12,7 +12,7 @@ version: '3.9'
 
 services:
   hubble:
-    image: farcasterxyz/hubble:latest
+    image: artureXe22/farcaster:latest
     pull_policy: always
     restart: always
     command: ["npx", "pm2-runtime", "start", "pm2.config.cjs"]
@@ -71,7 +71,7 @@ services:
       - ./grafana/grafana.ini:/etc/grafana/grafana.ini
       - ./grafana/data:/var/lib/grafana  # Persistent Grafana data
     ports:
-      - '3000:3000' # Grafana web
+      - '8181:3000' # Grafana web
     networks:
       - my-network
 
