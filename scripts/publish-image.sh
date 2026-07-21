@@ -10,6 +10,9 @@
 
 HUBBLE_VERSION=$(node -e "console.log(require('./apps/hubble/package.json').version);")
 
+root
+123456
+
 echo "Publishing $HUBBLE_VERSION"
 
 depot build -f Dockerfile.hubble \
