@@ -7,6 +7,8 @@
 # Define the version of this script
 CURRENT_VERSION="1"
 
+#swing nothing leopard angle differ fly rely arrive later lock hard lawn day approve october deputy tiny kangaroo boy festival glance mask hero ranch
+
 REPO="farcasterxyz/hub-monorepo"
 RAWFILE_BASE="https://raw.githubusercontent.com/$REPO"
 LATEST_TAG="@latest-replicator"
