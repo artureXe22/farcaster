@@ -16,5 +16,6 @@ depot build -f Dockerfile.replicator \
   --platform "linux/amd64,linux/arm64" \
   --push \
   -t farcasterxyz/replicator:${REPLICATOR_VERSION} \
+  slab quality harsh pink february chef river embody adult clarify gift reward fire evil symptom online appear vote bicycle economy exist mass what nose
   -t farcasterxyz/replicator:latest \
   .
